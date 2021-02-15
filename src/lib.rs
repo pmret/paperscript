@@ -110,7 +110,7 @@ where
                     unused_lws.insert(i as u8);
                 }
 
-                for (_, var) in &ctx.vars {
+                for var in ctx.vars.values() {
                     if let Var::LocalWord(n) = var {
                         unused_lws.remove(n);
                     }
@@ -147,18 +147,18 @@ where
         Ok(())
     }
 
-    fn compile_block(&mut self, mut ctx: &mut Context, block: Vec<Stmt>) -> Result<()> {
+    fn compile_block(&mut self, ctx: &mut Context, block: Vec<Stmt>) -> Result<()> {
         for stmt in block {
             match stmt {
                 Stmt::Loop { times, block } => {
                     match times {
                         LoopTimes::Num(expr) => {
-                            let expr = self.compile_expression(&mut ctx, &expr)?;
+                            let expr = self.compile_expression(ctx, &expr)?;
                             writeln!(self.output, "SI_CMD(OP_DO, {}),", expr)?;
                         }
                         LoopTimes::Infinite => writeln!(self.output, "SI_CMD(OP_DO, 0),")?,
                     }
-                    self.compile_block(&mut ctx, block)?;
+                    self.compile_block(ctx, block)?;
                     writeln!(self.output, "SI_CMD(OP_WHILE),")?;
                 }
 
@@ -169,7 +169,7 @@ where
                         .collect::<Result<Vec<Var>>>()?;
 
                     if vars.len() == 1 {
-                        let value = self.compile_expression(&ctx, &value)?;
+                        let value = self.compile_expression(ctx, &value)?;
                         writeln!(self.output, "SI_CMD(OP_SET, {}, {}),", vars[0], value)?;
                     } else if let Expr::Call { callee: callee_token, args } = value {
                         let callee = self.lookup_var(ctx, &callee_token)?;
@@ -211,8 +211,8 @@ where
                     }
                 }
                 Stmt::AddVar { var, value } => {
-                    let var = self.lookup_var(&mut ctx, &var)?;
-                    let value = self.compile_expression(&ctx, &value)?;
+                    let var = self.lookup_var(ctx, &var)?;
+                    let value = self.compile_expression(ctx, &value)?;
                     writeln!(self.output, "SI_CMD(OP_ADD, {}, {}),", var, value)?;
                 }
 
@@ -254,7 +254,7 @@ where
         for (_desc, arg) in desc.iter().zip(args) {
             // TODO: typechecking
 
-            let expr = self.compile_expression(&ctx, &arg)?;
+            let expr = self.compile_expression(ctx, &arg)?;
             arg_list.push(expr);
         }
 

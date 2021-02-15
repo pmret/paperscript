@@ -181,10 +181,10 @@ impl<'input> Iterator for Lexer<'input> {
                                     kind: TokenKind::BadIndentError,
                                     span: span.clone(),
                                 });
-                                return next.and_then(|(kind, span)| Some(Token {
+                                return next.map(|(kind, span)| Token {
                                     kind,
                                     span,
-                                }));
+                                });
                             }
                         }
 
@@ -196,10 +196,10 @@ impl<'input> Iterator for Lexer<'input> {
                                 kind: TokenKind::BadIndentError,
                                 span: span.clone(),
                             });
-                            return next.and_then(|(kind, span)| Some(Token {
+                            return next.map(|(kind, span)| Token {
                                 kind,
                                 span,
-                            }));
+                            });
                         }
 
                         let delta = (num_spaces / 4) - self.indent_level;

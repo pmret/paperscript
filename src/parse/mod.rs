@@ -114,7 +114,7 @@ impl<'input> Parser<'input> {
                 // loop n:
                 TokenKind::Loop => {
                     block.push(Stmt::Loop {
-                        times: if let Some(_) = self.accept(TokenKind::Colon)? {
+                        times: if self.accept(TokenKind::Colon)?.is_some() {
                             self.expect(TokenKind::Newline)?;
                             LoopTimes::Infinite
                         } else {
@@ -230,7 +230,7 @@ impl<'input> Parser<'input> {
         let token = self.next()?;
         match token.kind {
             TokenKind::Identifier => {
-                if let Some(_) = self.accept(TokenKind::OpenParen)? {
+                if self.accept(TokenKind::OpenParen)?.is_some() {
                     Ok(Expr::Call {
                         callee: token,
                         args: self.parse_comma_separated_expressions_until(TokenKind::CloseParen)?,
@@ -273,7 +273,7 @@ impl<'input> Parser<'input> {
     pub fn parse_comma_separated_expressions_until(&mut self, ending: TokenKind) -> Result<Vec<Expr>> {
         let mut list = Vec::new();
 
-        if let Some(_) = self.accept(ending)? {
+        if self.accept(ending)?.is_some() {
             return Ok(list);
         }
 
@@ -283,7 +283,7 @@ impl<'input> Parser<'input> {
             let token = self.next()?;
             match token.kind {
                 TokenKind::Comma => {
-                    if let Some(_) = self.accept(ending)? {
+                    if self.accept(ending)?.is_some() {
                         break;
                     }
 
