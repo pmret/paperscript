@@ -88,6 +88,12 @@ pub enum TokenKind {
     #[token("pass")]
     Pass,
 
+    #[token("sleep")]
+    Sleep,
+
+    #[token("sleepsecs")]
+    SleepSecs,
+
     #[token(":")]
     Colon,
 

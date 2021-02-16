@@ -160,6 +160,18 @@ impl<'input> Parser<'input> {
                     self.accept(TokenKind::Newline)?;
                 }
 
+                // sleep expr
+                TokenKind::Sleep => {
+                    block.push(Stmt::Sleep(self.parse_expression()?));
+                    self.accept(TokenKind::Newline)?;
+                }
+
+                // sleepsecs expr
+                TokenKind::SleepSecs => {
+                    block.push(Stmt::SleepSecs(self.parse_expression()?));
+                    self.accept(TokenKind::Newline)?;
+                }
+
                 TokenKind::Identifier | TokenKind::ExternalIdentifier => {
                     let operator = self.next()?;
                     match operator.kind {

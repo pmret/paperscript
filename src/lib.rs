@@ -197,10 +197,7 @@ where
                         .map(|var| self.lookup_or_declare_lw(ctx, &var))
                         .collect::<Result<Vec<Var>>>()?;
 
-                    if vars.len() == 1 {
-                        let value = self.compile_expression(ctx, &value)?;
-                        writeln!(self.output, "SI_CMD(OP_SET, {}, {}),", vars[0], value)?;
-                    } else if let Expr::Call { callee: callee_token, args } = value {
+                    if let Expr::Call { callee: callee_token, args } = value {
                         let callee = self.lookup_var(ctx, &callee_token)?;
                         match &callee {
                             Var::Function(_, func_desc) => {
@@ -244,6 +241,9 @@ where
                                 });
                             }
                         }
+                    } else if vars.len() == 1 {
+                        let value = self.compile_expression(ctx, &value)?;
+                        writeln!(self.output, "SI_CMD(OP_SET, {}, {}),", vars[0], value)?;
                     } else {
                         return Err(Error::UnsupportedExpression {
                             pos: eq.position(self.input),
@@ -269,7 +269,7 @@ where
                         for arg in args {
                             write!(self.output, ", {}", arg)?;
                         }
-                        writeln!(self.output, ");")?;
+                        writeln!(self.output, "),")?;
                     } else {
                         return Err(Error::CallNonFunction {
                             callee: callee_token.source(self.input).to_owned(),
@@ -279,27 +279,45 @@ where
                 }
 
                 Stmt::Exec { callee: callee_token } => {
-                    let callee = self.lookup_var(ctx, &callee_token)?;
-                    if let Var::Function(_, _) = &callee {
-                        return Err(Error::ExecNonScript {
-                            callee: callee_token.source(self.input).to_owned(),
-                            pos: callee_token.position(self.input),
-                        });
+                    if let Ok(callee) = self.lookup_var(ctx, &callee_token) {
+                        if let Var::Function(_, _) = &callee {
+                            return Err(Error::ExecNonScript {
+                                callee: callee_token.source(self.input).to_owned(),
+                                pos: callee_token.position(self.input),
+                            });
+                        } else {
+                            writeln!(self.output, "SI_CMD(OP_EXEC, {}),", callee)?;
+                        }
                     } else {
-                        writeln!(self.output, "SI_CMD(OP_EXEC, {})", callee)?;
+                        // Implicit declaration!
+                        writeln!(self.output, "SI_CMD(OP_EXEC, (Bytecode)(N({}))),", callee_token.source(self.input))?;
                     }
                 }
 
                 Stmt::ExecWait { callee: callee_token } => {
-                    let callee = self.lookup_var(ctx, &callee_token)?;
-                    if let Var::Function(_, _) = &callee {
-                        return Err(Error::ExecNonScript {
-                            callee: callee_token.source(self.input).to_owned(),
-                            pos: callee_token.position(self.input),
-                        });
+                    if let Ok(callee) = self.lookup_var(ctx, &callee_token) {
+                        if let Var::Function(_, _) = &callee {
+                            return Err(Error::ExecNonScript {
+                                callee: callee_token.source(self.input).to_owned(),
+                                pos: callee_token.position(self.input),
+                            });
+                        } else {
+                            writeln!(self.output, "SI_CMD(OP_EXEC_WAIT, {}),", callee)?;
+                        }
                     } else {
-                        writeln!(self.output, "SI_CMD(OP_EXEC_WAIT, {})", callee)?;
+                        // Implicit declaration!
+                        writeln!(self.output, "SI_CMD(OP_EXEC_WAIT, (Bytecode)(N({}))),", callee_token.source(self.input))?;
                     }
+                }
+
+                Stmt::Sleep(expr) => {
+                    let expr = self.compile_expression(ctx, &expr)?;
+                    writeln!(self.output, "SI_CMD(OP_SLEEP, {}),", expr)?;
+                }
+
+                Stmt::SleepSecs(expr) => {
+                    let expr = self.compile_expression(ctx, &expr)?;
+                    writeln!(self.output, "SI_CMD(OP_SLEEP_SECS, {}),", expr)?;
                 }
             }
         }

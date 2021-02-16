@@ -16,6 +16,8 @@ pub enum Stmt {
     Call { callee: Token, args: Vec<Expr> },
     Exec { callee: Token },
     ExecWait { callee: Token },
+    Sleep(Expr),
+    SleepSecs(Expr),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
