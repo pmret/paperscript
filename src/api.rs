@@ -9,7 +9,7 @@ pub struct Api {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Function {
-    pub args: Vec<Arg>,
+    pub args: Option<Vec<Arg>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]

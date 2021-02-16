@@ -73,6 +73,12 @@ pub enum TokenKind {
     #[token("local")]
     Local,
 
+    #[token("thread")]
+    Thread,
+
+    #[token("childthread")]
+    ChildThread,
+
     #[token("pass")]
     Pass,
 

@@ -47,6 +47,7 @@ pub enum Error {
     TooManyLocalWords { var_name: String, pos: (usize, usize) },
     UnknownVar { var_name: String, pos: (usize, usize) },
     CallNonFunction { callee: String, pos: (usize, usize) },
+    MissingFunctionSignature { callee: String, pos: (usize, usize) },
     CallOutNumMismatch { num_outs: usize, num_vars: usize, pos: (usize, usize) },
     UnsupportedExpression { pos: (usize, usize) },
 }
@@ -154,12 +155,24 @@ where
                     match times {
                         LoopTimes::Num(expr) => {
                             let expr = self.compile_expression(ctx, &expr)?;
-                            writeln!(self.output, "SI_CMD(OP_DO, {}),", expr)?;
+                            writeln!(self.output, "SI_CMD(OP_BEGIN_LOOP, {}),", expr)?;
                         }
-                        LoopTimes::Infinite => writeln!(self.output, "SI_CMD(OP_DO, 0),")?,
+                        LoopTimes::Infinite => writeln!(self.output, "SI_CMD(OP_BEGIN_LOOP, 0),")?,
                     }
                     self.compile_block(ctx, block)?;
-                    writeln!(self.output, "SI_CMD(OP_WHILE),")?;
+                    writeln!(self.output, "SI_CMD(OP_END_LOOP),")?;
+                }
+
+                Stmt::Thread(block) => {
+                    writeln!(self.output, "SI_CMD(OP_BEGIN_THREAD),")?;
+                    self.compile_block(ctx, block)?;
+                    writeln!(self.output, "SI_CMD(OP_END_THREAD),")?;
+                }
+
+                Stmt::ChildThread(block) => {
+                    writeln!(self.output, "SI_CMD(OP_BEGIN_CHILD_THREAD),")?;
+                    self.compile_block(ctx, block)?;
+                    writeln!(self.output, "SI_CMD(OP_END_CHILD_THREAD),")?;
                 }
 
                 Stmt::SetVars { vars, value, eq } => {
@@ -174,30 +187,37 @@ where
                     } else if let Expr::Call { callee: callee_token, args } = value {
                         let callee = self.lookup_var(ctx, &callee_token)?;
                         if let Var::Function(_, func_desc) = &callee {
-                            let (outs_desc, args_desc): (Vec<api::Arg>, Vec<api::Arg>) = func_desc.args.clone()
-                                .into_iter()
-                                .partition(|arg| arg.out);
-                        
-                            if outs_desc.len() != vars.len() {
-                                return Err(Error::CallOutNumMismatch {
-                                    num_outs: outs_desc.len(),
-                                    num_vars: vars.len(),
-                                    pos: eq.position(self.input),
+                            if let Some(func_args) = &func_desc.args {
+                                let (outs_desc, args_desc): (Vec<api::Arg>, Vec<api::Arg>) = func_args.clone()
+                                    .into_iter()
+                                    .partition(|arg| arg.out);
+                            
+                                if outs_desc.len() != vars.len() {
+                                    return Err(Error::CallOutNumMismatch {
+                                        num_outs: outs_desc.len(),
+                                        num_vars: vars.len(),
+                                        pos: eq.position(self.input),
+                                    });
+                                }
+
+                                let mut args = self.compile_call_args(ctx, &args, &args_desc)?.into_iter();
+                                let mut vars = vars.into_iter();
+
+                                write!(self.output, "SI_CMD(OP_USER_FUNC, {}", callee)?;
+                                for arg in func_args {
+                                    if arg.out {
+                                        write!(self.output, ", {}", vars.next().unwrap())?;
+                                    } else {
+                                        write!(self.output, ", {}", args.next().unwrap())?;
+                                    }
+                                }
+                                writeln!(self.output, ");")?;
+                            } else {
+                                return Err(Error::MissingFunctionSignature {
+                                    callee: callee_token.source(self.input).to_owned(),
+                                    pos: callee_token.position(self.input),
                                 });
                             }
-
-                            let mut args = self.compile_call_args(ctx, &args, &args_desc)?.into_iter();
-                            let mut vars = vars.into_iter();
-
-                            write!(self.output, "SI_CMD(OP_USER_FUNC, {}", callee)?;
-                            for arg in &func_desc.args {
-                                if arg.out {
-                                    write!(self.output, ", {}", vars.next().unwrap())?;
-                                } else {
-                                    write!(self.output, ", {}", args.next().unwrap())?;
-                                }
-                            }
-                            writeln!(self.output, ");")?;
                         } else {
                             return Err(Error::CallNonFunction {
                                 callee: callee_token.source(self.input).to_owned(),
@@ -219,7 +239,11 @@ where
                 Stmt::Call { callee: callee_token, args } => {
                     let callee = self.lookup_var(ctx, &callee_token)?;
                     if let Var::Function(_, func_desc) = &callee {
-                        let args = self.compile_call_args(ctx, &args, &func_desc.args)?;
+                        let args = if let Some(func_args) = &func_desc.args {
+                            self.compile_call_args(ctx, &args, &func_args)?
+                        } else {
+                            self.compile_call_args_no_desc(ctx, &args)?
+                        };
 
                         write!(self.output, "SI_CMD(OP_USER_FUNC, {}", callee)?;
                         for arg in args {
@@ -261,6 +285,17 @@ where
 
         Ok(arg_list)
     }
+
+    fn compile_call_args_no_desc(&mut self, ctx: &Context, args: &[Expr]) -> Result<Vec<String>> {
+        let mut arg_list = Vec::with_capacity(args.len());
+
+        for arg in args {
+            let expr = self.compile_expression(ctx, &arg)?;
+            arg_list.push(expr);
+        }
+
+        Ok(arg_list)
+    }
 }
 
 impl fmt::Display for Var {
@@ -284,6 +319,8 @@ impl fmt::Display for Error {
                 write!(f, "Use of unknown variable {:?} on line {} column {}", var_name, pos.0, pos.1),
             Error::CallNonFunction { callee, pos } =>
                 write!(f, "Attempt to call {:?} on line {} column {}, but it is not a function or a script", callee, pos.0, pos.1),
+            Error::MissingFunctionSignature { callee, pos } =>
+                write!(f, "Attempt to call {:?} on line {} column {}, but it does not have a known signature", callee, pos.0, pos.1),
             Error::CallOutNumMismatch { num_outs, num_vars, pos } =>
                 write!(f, "Call on line {} sets {} vars, but the callee returns {}", pos.0, num_vars, num_outs),
             Error::UnsupportedExpression { pos } =>

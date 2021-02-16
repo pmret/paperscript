@@ -9,6 +9,8 @@ pub struct Def {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Stmt {
     Loop { times: LoopTimes, block: Vec<Stmt> },
+    Thread(Vec<Stmt>),
+    ChildThread(Vec<Stmt>),
     SetVars { vars: Vec<Token>, value: Expr, eq: Token },
     AddVar { var: Token, value: Expr },
     Call { callee: Token, args: Vec<Expr> },

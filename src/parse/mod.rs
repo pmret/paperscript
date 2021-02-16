@@ -128,36 +128,21 @@ impl<'input> Parser<'input> {
                     self.accept(TokenKind::Newline)?;
                 }
 
-                /*
-                // var foo = 0
-                // var x, y, z = GetPlayerPos()
-                TokenKind::Var => {
-                    let mut vars  = Vec::with_capacity(1);
-
-                    loop {
-                        let var = self.expect(TokenKind::Identifier)?;
-                        let datatype = if let Some(_) = self.accept(TokenKind::Colon)? {
-                            self.next()?; // TODO: types
-                            Some(self.parse_expression()?)
-                        } else {
-                            None
-                        };
-
-                        vars.push(var);
-
-                        match self.next()? {
-                            Token { kind: TokenKind::Comma, .. } => continue,
-                            Token { kind: TokenKind::Equals, .. } => break,
-                            token => return Err(self.unexpected_token(token, "comma (followed by another var), or equals (followed by initial value)")),
-                        }
-                    }
-
-                    block.push(Stmt::DeclareVars {
-                        vars,
-                        value: self.parse_expression()?,
-                    });
+                // thread:
+                TokenKind::Thread => {
+                    self.expect(TokenKind::Colon)?;
+                    self.expect(TokenKind::Newline)?;
+                    block.push(Stmt::Thread(self.parse_indented_block()?));
+                    self.accept(TokenKind::Newline)?;
                 }
-                */
+
+                // childthread:
+                TokenKind::ChildThread => {
+                    self.expect(TokenKind::Colon)?;
+                    self.expect(TokenKind::Newline)?;
+                    block.push(Stmt::ChildThread(self.parse_indented_block()?));
+                    self.accept(TokenKind::Newline)?;
+                }
 
                 TokenKind::Identifier | TokenKind::ExternalIdentifier => {
                     let operator = self.next()?;
