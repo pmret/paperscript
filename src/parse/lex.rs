@@ -79,6 +79,12 @@ pub enum TokenKind {
     #[token("childthread")]
     ChildThread,
 
+    #[token("exec")]
+    Exec,
+
+    #[token("execwait")]
+    ExecWait,
+
     #[token("pass")]
     Pass,
 

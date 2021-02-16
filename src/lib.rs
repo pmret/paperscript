@@ -38,6 +38,7 @@ enum Var {
     LocalWord(u8),
     Extern(String),
     Function(String, api::Function),
+    Script(String, api::Script),
 }
 
 #[derive(Debug)]
@@ -47,6 +48,7 @@ pub enum Error {
     TooManyLocalWords { var_name: String, pos: (usize, usize) },
     UnknownVar { var_name: String, pos: (usize, usize) },
     CallNonFunction { callee: String, pos: (usize, usize) },
+    ExecNonScript { callee: String, pos: (usize, usize) },
     MissingFunctionSignature { callee: String, pos: (usize, usize) },
     CallOutNumMismatch { num_outs: usize, num_vars: usize, pos: (usize, usize) },
     UnsupportedExpression { pos: (usize, usize) },
@@ -90,7 +92,21 @@ where
         }
 
         if let Some(func) = self.api.functions.get(var_name) {
-            return Ok(Var::Function(var_name.to_string(), func.clone()));
+            let name = if func.namespace {
+                format!("N({})", var_name)
+            } else {
+                var_name.to_owned()
+            };
+            return Ok(Var::Function(name, func.clone()));
+        }
+
+        if let Some(script) = self.api.scripts.get(var_name) {
+            let name = if script.namespace {
+                format!("N({})", var_name)
+            } else {
+                var_name.to_owned()
+            };
+            return Ok(Var::Script(name, script.clone()));
         }
 
         Err(Error::UnknownVar {
@@ -186,43 +202,47 @@ where
                         writeln!(self.output, "SI_CMD(OP_SET, {}, {}),", vars[0], value)?;
                     } else if let Expr::Call { callee: callee_token, args } = value {
                         let callee = self.lookup_var(ctx, &callee_token)?;
-                        if let Var::Function(_, func_desc) = &callee {
-                            if let Some(func_args) = &func_desc.args {
-                                let (outs_desc, args_desc): (Vec<api::Arg>, Vec<api::Arg>) = func_args.clone()
-                                    .into_iter()
-                                    .partition(|arg| arg.out);
-                            
-                                if outs_desc.len() != vars.len() {
-                                    return Err(Error::CallOutNumMismatch {
-                                        num_outs: outs_desc.len(),
-                                        num_vars: vars.len(),
-                                        pos: eq.position(self.input),
+                        match &callee {
+                            Var::Function(_, func_desc) => {
+                                if let Some(func_args) = &func_desc.args {
+                                    let (outs_desc, args_desc): (Vec<api::Arg>, Vec<api::Arg>) = func_args.clone()
+                                        .into_iter()
+                                        .partition(|arg| arg.out);
+                                
+                                    if outs_desc.len() != vars.len() {
+                                        return Err(Error::CallOutNumMismatch {
+                                            num_outs: outs_desc.len(),
+                                            num_vars: vars.len(),
+                                            pos: eq.position(self.input),
+                                        });
+                                    }
+    
+                                    let mut args = self.compile_call_args(ctx, &args, &args_desc)?.into_iter();
+                                    let mut vars = vars.into_iter();
+    
+                                    write!(self.output, "SI_CMD(OP_USER_FUNC, {}", callee)?;
+                                    for arg in func_args {
+                                        if arg.out {
+                                            write!(self.output, ", {}", vars.next().unwrap())?;
+                                        } else {
+                                            write!(self.output, ", {}", args.next().unwrap())?;
+                                        }
+                                    }
+                                    writeln!(self.output, ");")?;
+                                } else {
+                                    return Err(Error::MissingFunctionSignature {
+                                        callee: callee_token.source(self.input).to_owned(),
+                                        pos: callee_token.position(self.input),
                                     });
                                 }
-
-                                let mut args = self.compile_call_args(ctx, &args, &args_desc)?.into_iter();
-                                let mut vars = vars.into_iter();
-
-                                write!(self.output, "SI_CMD(OP_USER_FUNC, {}", callee)?;
-                                for arg in func_args {
-                                    if arg.out {
-                                        write!(self.output, ", {}", vars.next().unwrap())?;
-                                    } else {
-                                        write!(self.output, ", {}", args.next().unwrap())?;
-                                    }
-                                }
-                                writeln!(self.output, ");")?;
-                            } else {
-                                return Err(Error::MissingFunctionSignature {
+                            }
+                            
+                            _ => {
+                                return Err(Error::CallNonFunction {
                                     callee: callee_token.source(self.input).to_owned(),
                                     pos: callee_token.position(self.input),
                                 });
                             }
-                        } else {
-                            return Err(Error::CallNonFunction {
-                                callee: callee_token.source(self.input).to_owned(),
-                                pos: callee_token.position(self.input),
-                            });
                         }
                     } else {
                         return Err(Error::UnsupportedExpression {
@@ -245,7 +265,7 @@ where
                             self.compile_call_args_no_desc(ctx, &args)?
                         };
 
-                        write!(self.output, "SI_CMD(OP_USER_FUNC, {}", callee)?;
+                        write!(self.output, "SI_CMD(OP_CALL_FUNC, {}", callee)?;
                         for arg in args {
                             write!(self.output, ", {}", arg)?;
                         }
@@ -255,6 +275,30 @@ where
                             callee: callee_token.source(self.input).to_owned(),
                             pos: callee_token.position(self.input),
                         });
+                    }
+                }
+
+                Stmt::Exec { callee: callee_token } => {
+                    let callee = self.lookup_var(ctx, &callee_token)?;
+                    if let Var::Function(_, _) = &callee {
+                        return Err(Error::ExecNonScript {
+                            callee: callee_token.source(self.input).to_owned(),
+                            pos: callee_token.position(self.input),
+                        });
+                    } else {
+                        writeln!(self.output, "SI_CMD(OP_EXEC, {})", callee)?;
+                    }
+                }
+
+                Stmt::ExecWait { callee: callee_token } => {
+                    let callee = self.lookup_var(ctx, &callee_token)?;
+                    if let Var::Function(_, _) = &callee {
+                        return Err(Error::ExecNonScript {
+                            callee: callee_token.source(self.input).to_owned(),
+                            pos: callee_token.position(self.input),
+                        });
+                    } else {
+                        writeln!(self.output, "SI_CMD(OP_EXEC_WAIT, {})", callee)?;
                     }
                 }
             }
@@ -304,6 +348,7 @@ impl fmt::Display for Var {
             Var::LocalWord(n) => write!(f, "LW({})", n),
             Var::Extern(ext) => write!(f, "(Bytecode)({})", ext),
             Var::Function(name, _) => write!(f, "(Bytecode)(&{})", name),
+            Var::Script(name, _) => write!(f, "(Bytecode)({})", name),
         }
     }
 }
@@ -318,7 +363,9 @@ impl fmt::Display for Error {
             Error::UnknownVar { var_name, pos } =>
                 write!(f, "Use of unknown variable {:?} on line {} column {}", var_name, pos.0, pos.1),
             Error::CallNonFunction { callee, pos } =>
-                write!(f, "Attempt to call {:?} on line {} column {}, but it is not a function or a script", callee, pos.0, pos.1),
+                write!(f, "Attempt to call {:?} on line {} column {}, but it is not a function (hint: use 'exec' or 'execwait' to run scripts)", callee, pos.0, pos.1),
+            Error::ExecNonScript { callee, pos } =>
+                write!(f, "Attempt to exec {:?} on line {} column {}, but it is not a script", callee, pos.0, pos.1),
             Error::MissingFunctionSignature { callee, pos } =>
                 write!(f, "Attempt to call {:?} on line {} column {}, but it does not have a known signature", callee, pos.0, pos.1),
             Error::CallOutNumMismatch { num_outs, num_vars, pos } =>

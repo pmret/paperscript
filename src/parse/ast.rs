@@ -14,6 +14,8 @@ pub enum Stmt {
     SetVars { vars: Vec<Token>, value: Expr, eq: Token },
     AddVar { var: Token, value: Expr },
     Call { callee: Token, args: Vec<Expr> },
+    Exec { callee: Token },
+    ExecWait { callee: Token },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

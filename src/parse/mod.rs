@@ -84,8 +84,8 @@ impl<'input> Parser<'input> {
     pub fn parse_def(&mut self) -> Result<Def> {
         self.expect(TokenKind::Def)?;
         let name = self.expect(TokenKind::Identifier)?;
-        self.expect(TokenKind::OpenParen)?;
-        self.expect(TokenKind::CloseParen)?;
+        //self.expect(TokenKind::OpenParen)?;
+        //self.expect(TokenKind::CloseParen)?;
         self.expect(TokenKind::Colon)?;
         self.expect(TokenKind::Newline)?;
         let block = self.parse_indented_block()?;
@@ -141,6 +141,22 @@ impl<'input> Parser<'input> {
                     self.expect(TokenKind::Colon)?;
                     self.expect(TokenKind::Newline)?;
                     block.push(Stmt::ChildThread(self.parse_indented_block()?));
+                    self.accept(TokenKind::Newline)?;
+                }
+
+                // exec identifier
+                TokenKind::Exec => {
+                    block.push(Stmt::Exec {
+                        callee: self.expect(TokenKind::Identifier)?,
+                    });
+                    self.accept(TokenKind::Newline)?;
+                }
+
+                // execwait identifier
+                TokenKind::ExecWait => {
+                    block.push(Stmt::ExecWait {
+                        callee: self.expect(TokenKind::Identifier)?,
+                    });
                     self.accept(TokenKind::Newline)?;
                 }
 
