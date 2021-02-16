@@ -18,6 +18,7 @@ pub enum Stmt {
 pub enum Expr {
     Identifier(Token),
     Int { value: i32, token: Token },
+    Float { token: Token },
     Call { callee: Token, args: Vec<Expr> },
 }
 

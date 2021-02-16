@@ -242,6 +242,7 @@ where
         match expr {
             Expr::Identifier(var) => Ok(format!("{}", self.lookup_var(ctx, var)?)),
             Expr::Int { value, .. } => Ok(format!("{}", value)),
+            Expr::Float { token, .. } => Ok(format!("SI_FIXED({})", token.source(self.input))),
             Expr::Call { callee, .. } => Err(Error::UnsupportedExpression { pos: callee.position(self.input) }),
         }
     }

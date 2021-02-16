@@ -99,7 +99,7 @@ pub enum TokenKind {
 
     /// External identifiers include basic C macro invocations like "LW(0)" or "STORY_PROGRESS".
     /// These are treated as black boxes (single tokens) and can typically be used in place of variables.
-    #[regex(r"[A-Z][A-Z0-9]+(_[a-zA-Z0-9_]+)?(\([^)]+\))?")]
+    #[regex(r"([A-Z][A-Z0-9]*(_[a-zA-Z0-9_]+)?|&[a-zA-Z0-9_]+)(\([^)]+\))?", priority=2)]
     ExternalIdentifier,
 
     #[token("true")]
@@ -463,6 +463,14 @@ mod test {
             Token { kind: Identifier, span: 0..2 },
             Token { kind: OpenParen, span: 2..3 },
             Token { kind: CloseParen, span: 3..4 },
+        ]);
+    }
+
+    #[test]
+    fn extern_identifier_ref() {
+        let toks: Vec<Token> = Lexer::new("&asdf").collect();
+        assert_eq!(toks, vec![
+            Token { kind: ExternalIdentifier, span: 0..5 },
         ]);
     }
 }

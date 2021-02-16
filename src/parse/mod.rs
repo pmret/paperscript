@@ -229,7 +229,7 @@ impl<'input> Parser<'input> {
     pub fn parse_expression(&mut self) -> Result<Expr> {
         let token = self.next()?;
         match token.kind {
-            TokenKind::Identifier => {
+            TokenKind::Identifier | TokenKind::ExternalIdentifier => {
                 if self.accept(TokenKind::OpenParen)?.is_some() {
                     Ok(Expr::Call {
                         callee: token,
@@ -262,6 +262,12 @@ impl<'input> Parser<'input> {
                             token,
                         }),
                     },
+                    token,
+                })
+            }
+
+            TokenKind::Float => {
+                Ok(Expr::Float {
                     token,
                 })
             }
