@@ -5,7 +5,7 @@ mod warning;
 pub mod api;
 
 pub use warning::Warning;
-pub use api::Api;
+pub use api::{Api, Datatype};
 
 use std::fmt;
 use std::collections::{HashMap, BTreeSet};
@@ -61,6 +61,7 @@ where
     O: Write,
     F: FnMut(Warning),
 {
+    writeln!(output, "#include \"si.h\"")?;
     let mut compiler = Compiler::new(input, output, api, handle_warning);
     compiler.compile()
 }
@@ -170,7 +171,7 @@ where
                 Stmt::Loop { times, block } => {
                     match times {
                         LoopTimes::Num(expr) => {
-                            let expr = self.compile_expression(ctx, &expr)?;
+                            let (expr, _) = self.compile_expression(ctx, &expr)?;
                             writeln!(self.output, "SI_CMD(OP_BEGIN_LOOP, {}),", expr)?;
                         }
                         LoopTimes::Infinite => writeln!(self.output, "SI_CMD(OP_BEGIN_LOOP, 0),")?,
@@ -217,7 +218,7 @@ where
                                     let mut args = self.compile_call_args(ctx, &args, &args_desc)?.into_iter();
                                     let mut vars = vars.into_iter();
     
-                                    write!(self.output, "SI_CMD(OP_USER_FUNC, {}", callee)?;
+                                    write!(self.output, "SI_CMD(OP_CALL_FUNC, {}", callee)?;
                                     for arg in func_args {
                                         if arg.out {
                                             write!(self.output, ", {}", vars.next().unwrap())?;
@@ -242,8 +243,12 @@ where
                             }
                         }
                     } else if vars.len() == 1 {
-                        let value = self.compile_expression(ctx, &value)?;
-                        writeln!(self.output, "SI_CMD(OP_SET, {}, {}),", vars[0], value)?;
+                        let (value, datatype) = self.compile_expression(ctx, &value)?;
+                        match datatype {
+                            Datatype::Int => writeln!(self.output, "SI_CMD(OP_SET, {}, {}),", vars[0], value)?,
+                            Datatype::Float => writeln!(self.output, "SI_CMD(OP_SET_F, {}, {}),", vars[0], value)?,
+                            Datatype::Const => writeln!(self.output, "SI_CMD(OP_SET_CONST, {}, {}),", vars[0], value)?,
+                        }
                     } else {
                         return Err(Error::UnsupportedExpression {
                             pos: eq.position(self.input),
@@ -252,8 +257,11 @@ where
                 }
                 Stmt::AddVar { var, value } => {
                     let var = self.lookup_var(ctx, &var)?;
-                    let value = self.compile_expression(ctx, &value)?;
-                    writeln!(self.output, "SI_CMD(OP_ADD, {}, {}),", var, value)?;
+                    let (value, datatype) = self.compile_expression(ctx, &value)?;
+                    match datatype {
+                        Datatype::Int | Datatype::Const => writeln!(self.output, "SI_CMD(OP_ADD, {}, {}),", var, value)?,
+                        Datatype::Float => writeln!(self.output, "SI_CMD(OP_ADD_F, {}, {}),", var, value)?,
+                    }
                 }
 
                 Stmt::Call { callee: callee_token, args } => {
@@ -311,12 +319,12 @@ where
                 }
 
                 Stmt::Sleep(expr) => {
-                    let expr = self.compile_expression(ctx, &expr)?;
-                    writeln!(self.output, "SI_CMD(OP_SLEEP, {}),", expr)?;
+                    let (expr, _) = self.compile_expression(ctx, &expr)?;
+                    writeln!(self.output, "SI_CMD(OP_SLEEP_FRAMES, {}),", expr)?;
                 }
 
                 Stmt::SleepSecs(expr) => {
-                    let expr = self.compile_expression(ctx, &expr)?;
+                    let (expr, _) = self.compile_expression(ctx, &expr)?;
                     writeln!(self.output, "SI_CMD(OP_SLEEP_SECS, {}),", expr)?;
                 }
             }
@@ -324,11 +332,11 @@ where
         Ok(())
     }
 
-    fn compile_expression(&mut self, ctx: &Context, expr: &Expr) -> Result<String> {
+    fn compile_expression(&mut self, ctx: &Context, expr: &Expr) -> Result<(String, Datatype)> {
         match expr {
-            Expr::Identifier(var) => Ok(format!("{}", self.lookup_var(ctx, var)?)),
-            Expr::Int { value, .. } => Ok(format!("{}", value)),
-            Expr::Float { token, .. } => Ok(format!("SI_FIXED({})", token.source(self.input))),
+            Expr::Identifier(var) => Ok((format!("{}", self.lookup_var(ctx, var)?), Datatype::Int)), // TODO: use datatype of var
+            Expr::Int { value, .. } => Ok((format!("{}", value), Datatype::Int)),
+            Expr::Float { token, .. } => Ok((format!("SI_FIXED({})", token.source(self.input)), Datatype::Float)),
             Expr::Call { callee, .. } => Err(Error::UnsupportedExpression { pos: callee.position(self.input) }),
         }
     }
@@ -341,7 +349,7 @@ where
         for (_desc, arg) in desc.iter().zip(args) {
             // TODO: typechecking
 
-            let expr = self.compile_expression(ctx, &arg)?;
+            let (expr, _) = self.compile_expression(ctx, &arg)?;
             arg_list.push(expr);
         }
 
@@ -352,7 +360,7 @@ where
         let mut arg_list = Vec::with_capacity(args.len());
 
         for arg in args {
-            let expr = self.compile_expression(ctx, &arg)?;
+            let (expr, _) = self.compile_expression(ctx, &arg)?;
             arg_list.push(expr);
         }
 
