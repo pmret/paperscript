@@ -62,7 +62,7 @@ where
     O: Write,
     F: FnMut(Warning),
 {
-    writeln!(output, "#include \"si.h\"")?;
+    writeln!(output, "#include \"common.h\"")?;
     let mut compiler = Compiler::new(input, output, api, handle_warning);
     compiler.compile()
 }
@@ -153,13 +153,43 @@ where
 
     // TODO: don't fail fast on blocks with errors, use handle_warning or similar
     fn compile(&mut self) -> Result<()> {
+        let mut global_ctx = Context::default();
+        let mut defs = Vec::new();
+
         while !self.parser.is_eof() {
             let def = self.parser.parse_def()?;
             let script_name = def.name.source(self.input);
-            let mut ctx = Context::default();
 
-            writeln!(self.output, "Bytecode N({})[] = {{", script_name)?;
+            let namespace = if let Some(script) = self.api.scripts.get(script_name) {
+                script.namespace
+            } else {
+                // Add the script var to context so it can be referenced from now on
+                let var = Var::Script(script_name.to_owned(), api::Script { namespace: false });
+                global_ctx.vars.insert(script_name.to_owned(), var);
+
+                false
+            };
+
+            if namespace {
+                writeln!(self.output, "Bytecode {}[];", script_name)?;
+            } else {
+                writeln!(self.output, "Bytecode N({})[];", script_name)?;
+            }
+
+            defs.push((script_name, def, namespace));
+        }
+
+        for (script_name, def, namespace) in defs {
+            let mut ctx = global_ctx.clone();
+
+            if namespace {
+                writeln!(self.output, "Bytecode {}[] = {{", script_name)?;
+            } else {
+                writeln!(self.output, "Bytecode N({})[] = {{", script_name)?;
+            }
+
             self.compile_block(&mut ctx, def.block)?;
+
             writeln!(self.output, "}};")?;
         }
 
