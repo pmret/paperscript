@@ -106,6 +106,36 @@ pub enum TokenKind {
     #[token("+=")]
     PlusEquals,
 
+    #[token("-=")]
+    MinusEquals,
+    
+    #[token("*=")]
+    TimesEquals,
+
+    #[token("/=")]
+    DivEquals,
+
+    #[token("%=")]
+    ModEquals,
+
+    #[token("==")]
+    EqEq,
+
+    #[token("!=")]
+    NotEq,
+
+    #[token(">")]
+    GreaterThan,
+
+    #[token("<")]
+    LessThan,
+
+    #[token(">=")]
+    GreaterThanEq,
+
+    #[token("<=")]
+    LessThanEq,
+
     #[token("(")]
     OpenParen,
 

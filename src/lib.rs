@@ -51,7 +51,8 @@ pub enum Error {
     ExecNonScript { callee: String, pos: (usize, usize) },
     MissingFunctionSignature { callee: String, pos: (usize, usize) },
     CallOutNumMismatch { num_outs: usize, num_vars: usize, pos: (usize, usize) },
-    UnsupportedExpression { pos: (usize, usize) },
+    UnsupportedExpression,
+    AssignmentTypeMismatch { pos: (usize, usize) },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -192,6 +193,42 @@ where
                     writeln!(self.output, "SI_CMD(OP_END_CHILD_THREAD),")?;
                 }
 
+                Stmt::If { condition, then_block, else_block, .. } => {
+                    // Simple expression (single boolean infix)
+                    let done = if let Expr::Infix(lhs, op_token, rhs) = &condition {
+                        match op_token.kind {
+                            TokenKind::EqEq => {
+                                let (lhs, _) = self.compile_expression(ctx, lhs)?;
+                                let (rhs, _) = self.compile_expression(ctx, rhs)?;
+                                writeln!(self.output, "SI_CMD(OP_IF_EQ, {}, {}),", lhs, rhs)?;
+                                true
+                            }
+                            // TODO more
+                            _ => false,
+                        }
+                    } else {
+                        false
+                    };
+
+                    // Complex expression (compile expression to temp, then check that)
+                    if !done {
+                        let (condition, _datatype) = self.compile_expression(ctx, &condition)?;
+
+                        // TODO: warn if datatype is not bool
+
+                        writeln!(self.output, "SI_CMD(OP_IF_EQ, {}, TRUE),", condition)?;
+                    }
+
+                    self.compile_block(ctx, then_block)?;
+
+                    if let Some(else_block) = else_block {
+                        writeln!(self.output, "SI_CMD(OP_ELSE),")?;
+                        self.compile_block(ctx, else_block)?;
+                    }
+
+                    writeln!(self.output, "SI_CMD(OP_END_IF),")?;
+                }
+
                 Stmt::SetVars { vars, value, eq } => {
                     let vars = vars
                         .into_iter()
@@ -245,22 +282,66 @@ where
                     } else if vars.len() == 1 {
                         let (value, datatype) = self.compile_expression(ctx, &value)?;
                         match datatype {
-                            Datatype::Int => writeln!(self.output, "SI_CMD(OP_SET, {}, {}),", vars[0], value)?,
+                            Datatype::Int | Datatype::Bool => writeln!(self.output, "SI_CMD(OP_SET, {}, {}),", vars[0], value)?,
                             Datatype::Float => writeln!(self.output, "SI_CMD(OP_SET_F, {}, {}),", vars[0], value)?,
                             Datatype::Const => writeln!(self.output, "SI_CMD(OP_SET_CONST, {}, {}),", vars[0], value)?,
                         }
                     } else {
-                        return Err(Error::UnsupportedExpression {
-                            pos: eq.position(self.input),
-                        });
+                        return Err(Error::UnsupportedExpression);
                     }
                 }
-                Stmt::AddVar { var, value } => {
-                    let var = self.lookup_var(ctx, &var)?;
+                Stmt::AddVar { var: var_token, value } => {
+                    let var = self.lookup_var(ctx, &var_token)?;
                     let (value, datatype) = self.compile_expression(ctx, &value)?;
                     match datatype {
                         Datatype::Int | Datatype::Const => writeln!(self.output, "SI_CMD(OP_ADD, {}, {}),", var, value)?,
                         Datatype::Float => writeln!(self.output, "SI_CMD(OP_ADD_F, {}, {}),", var, value)?,
+                        Datatype::Bool => return Err(Error::AssignmentTypeMismatch {
+                            pos: var_token.position(self.input),
+                        }),
+                    }
+                }
+                Stmt::SubVar { var: var_token, value } => {
+                    let var = self.lookup_var(ctx, &var_token)?;
+                    let (value, datatype) = self.compile_expression(ctx, &value)?;
+                    match datatype {
+                        Datatype::Int | Datatype::Const => writeln!(self.output, "SI_CMD(OP_SUB, {}, {}),", var, value)?,
+                        Datatype::Float => writeln!(self.output, "SI_CMD(OP_SUB_F, {}, {}),", var, value)?,
+                        Datatype::Bool => return Err(Error::AssignmentTypeMismatch {
+                            pos: var_token.position(self.input),
+                        }),
+                    }
+                }
+                Stmt::MulVar { var: var_token, value } => {
+                    let var = self.lookup_var(ctx, &var_token)?;
+                    let (value, datatype) = self.compile_expression(ctx, &value)?;
+                    match datatype {
+                        Datatype::Int | Datatype::Const => writeln!(self.output, "SI_CMD(OP_MUL, {}, {}),", var, value)?,
+                        Datatype::Float => writeln!(self.output, "SI_CMD(OP_MUL_F, {}, {}),", var, value)?,
+                        Datatype::Bool => return Err(Error::AssignmentTypeMismatch {
+                            pos: var_token.position(self.input),
+                        }),
+                    }
+                }
+                Stmt::DivVar { var: var_token, value } => {
+                    let var = self.lookup_var(ctx, &var_token)?;
+                    let (value, datatype) = self.compile_expression(ctx, &value)?;
+                    match datatype {
+                        Datatype::Int | Datatype::Const => writeln!(self.output, "SI_CMD(OP_DIV, {}, {}),", var, value)?,
+                        Datatype::Float => writeln!(self.output, "SI_CMD(OP_DIV_F, {}, {}),", var, value)?,
+                        Datatype::Bool => return Err(Error::AssignmentTypeMismatch {
+                            pos: var_token.position(self.input),
+                        }),
+                    }
+                }
+                Stmt::ModVar { var: var_token, value } => {
+                    let var = self.lookup_var(ctx, &var_token)?;
+                    let (value, datatype) = self.compile_expression(ctx, &value)?;
+                    match datatype {
+                        Datatype::Int | Datatype::Const | Datatype::Float => writeln!(self.output, "SI_CMD(OP_MOD, {}, {}),", var, value)?,
+                        Datatype::Bool => return Err(Error::AssignmentTypeMismatch {
+                            pos: var_token.position(self.input),
+                        }),
                     }
                 }
 
@@ -336,8 +417,8 @@ where
         match expr {
             Expr::Identifier(var) => Ok((format!("{}", self.lookup_var(ctx, var)?), Datatype::Int)), // TODO: use datatype of var
             Expr::Int { value, .. } => Ok((format!("{}", value), Datatype::Int)),
-            Expr::Float { token, .. } => Ok((format!("SI_FIXED({})", token.source(self.input)), Datatype::Float)),
-            Expr::Call { callee, .. } => Err(Error::UnsupportedExpression { pos: callee.position(self.input) }),
+            Expr::Float { token, .. } => Ok((format!("SI_FIXED({}f)", token.source(self.input)), Datatype::Float)),
+            _ => Err(Error::UnsupportedExpression),
         }
     }
 
@@ -396,8 +477,10 @@ impl fmt::Display for Error {
                 write!(f, "Attempt to call {:?} on line {} column {}, but it does not have a known signature", callee, pos.0, pos.1),
             Error::CallOutNumMismatch { num_outs, num_vars, pos } =>
                 write!(f, "Call on line {} sets {} vars, but the callee returns {}", pos.0, num_vars, num_outs),
-            Error::UnsupportedExpression { pos } =>
-                write!(f, "Complex expression on line {} column {} is not yet supported", pos.0, pos.1),
+            Error::UnsupportedExpression =>
+                write!(f, "Complex expressions are not supported"),
+            Error::AssignmentTypeMismatch { pos } =>
+                write!(f, "Assignment on line {} illegally mixes types", pos.0),
         }
     }
 }

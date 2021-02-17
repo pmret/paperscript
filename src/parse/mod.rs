@@ -62,7 +62,12 @@ impl<'input> Parser<'input> {
     }
 
     fn accept(&mut self, token_kind: TokenKind) -> Result<Option<Token>> {
-        if self.peek()?.kind == token_kind {
+        let got = if let Ok(token) = self.peek() {
+            token
+        } else {
+            return Ok(None);
+        };
+        if got.kind == token_kind {
             Ok(Some(self.next()?))
         } else {
             Ok(None)
@@ -144,6 +149,14 @@ impl<'input> Parser<'input> {
                     self.accept(TokenKind::Newline)?;
                 }
 
+                // if expr:
+                //     block
+                // elif epxr:
+                //     block
+                // else:
+                //     block
+                TokenKind::If => block.push(self.parse_if()?),
+
                 // exec identifier
                 TokenKind::Exec => {
                     block.push(Stmt::Exec {
@@ -216,6 +229,42 @@ impl<'input> Parser<'input> {
                             self.expect(TokenKind::Newline)?;
                         }
 
+                        // foo -= expr
+                        TokenKind::MinusEquals => {
+                            block.push(Stmt::SubVar {
+                                var: token,
+                                value: self.parse_expression()?,
+                            });
+                            self.expect(TokenKind::Newline)?;
+                        }
+
+                        // foo *= expr
+                        TokenKind::TimesEquals => {
+                            block.push(Stmt::MulVar {
+                                var: token,
+                                value: self.parse_expression()?,
+                            });
+                            self.expect(TokenKind::Newline)?;
+                        }
+
+                        // foo /= expr
+                        TokenKind::DivEquals => {
+                            block.push(Stmt::DivVar {
+                                var: token,
+                                value: self.parse_expression()?,
+                            });
+                            self.expect(TokenKind::Newline)?;
+                        }
+
+                        // foo %= expr
+                        TokenKind::ModEquals => {
+                            block.push(Stmt::ModVar {
+                                var: token,
+                                value: self.parse_expression()?,
+                            });
+                            self.expect(TokenKind::Newline)?;
+                        }
+
                         // foo(...)
                         TokenKind::OpenParen => {
                             block.push(Stmt::Call {
@@ -240,21 +289,22 @@ impl<'input> Parser<'input> {
     }
 
     pub fn parse_expression(&mut self) -> Result<Expr> {
+        // Prefix
         let token = self.next()?;
-        match token.kind {
+        let expr = match token.kind {
             TokenKind::Identifier | TokenKind::ExternalIdentifier => {
                 if self.accept(TokenKind::OpenParen)?.is_some() {
-                    Ok(Expr::Call {
+                    Expr::Call {
                         callee: token,
                         args: self.parse_comma_separated_expressions_until(TokenKind::CloseParen)?,
-                    })
+                    }
                 } else {
-                    Ok(Expr::Identifier(token))
+                    Expr::Identifier(token)
                 }
             },
 
             TokenKind::Int => {
-                Ok(Expr::Int {
+                Expr::Int {
                     value: match i32::from_str_radix(&self.input[token.span.clone()], 10) {
                         Ok(i) => i,
                         Err(_) => return Err(Error::ParseInt {
@@ -263,11 +313,11 @@ impl<'input> Parser<'input> {
                         }),
                     },
                     token,
-                })
+                }
             }
 
             TokenKind::HexInt => {
-                Ok(Expr::Int {
+                Expr::Int {
                     value: match i32::from_str_radix(&self.input[token.span.clone()].replace("0x", ""), 16) {
                         Ok(i) => i,
                         Err(_) => return Err(Error::ParseInt {
@@ -276,17 +326,37 @@ impl<'input> Parser<'input> {
                         }),
                     },
                     token,
-                })
+                }
             }
 
             TokenKind::Float => {
-                Ok(Expr::Float {
+                Expr::Float {
                     token,
-                })
+                }
             }
 
-            _ => Err(self.unexpected_token(token, "expression")),
-        }
+            _ => return Err(self.unexpected_token(token, "expression")),
+        };
+
+        // Infix
+        let operator = if let Ok(op) = self.peek() {
+            op
+        } else {
+            // EOF
+            return Ok(expr);
+        };
+        let expr = if let Some(_precedence) = INFIX.get(&operator.kind) {
+            let operator = self.next()?;
+            let lhs = expr;
+            let rhs = self.parse_expression()?;
+
+            Expr::Infix(Box::new(lhs), operator, Box::new(rhs))
+        } else {
+            // No infix operator :(
+            expr
+        };
+
+        Ok(expr)
     }
 
     pub fn parse_comma_separated_expressions_until(&mut self, ending: TokenKind) -> Result<Vec<Expr>> {
@@ -314,6 +384,43 @@ impl<'input> Parser<'input> {
         }
 
         Ok(list)
+    }
+
+    pub fn parse_if(&mut self) -> Result<Stmt> {
+        // Note: If/Elif expected to be parsed already
+
+        let condition = self.parse_expression()?;
+        self.expect(TokenKind::Colon)?;
+        self.expect(TokenKind::Newline)?;
+
+        let then_block = self.parse_indented_block()?;
+        self.accept(TokenKind::Newline)?;
+
+        if self.accept(TokenKind::Elif)?.is_some() {
+            Ok(Stmt::If {
+                condition,
+                then_block,
+                else_block: Some(vec![self.parse_if()?]),
+            })
+        } else if self.accept(TokenKind::Else)?.is_some() {
+            self.expect(TokenKind::Colon)?;
+            self.expect(TokenKind::Newline)?;
+
+            let else_block = self.parse_indented_block()?;
+            self.accept(TokenKind::Newline)?;
+
+            Ok(Stmt::If {
+                condition,
+                then_block,
+                else_block: Some(else_block),
+            })
+        } else {
+            Ok(Stmt::If {
+                condition,
+                then_block,
+                else_block: None,
+            })
+        }
     }
 }
 
@@ -343,7 +450,7 @@ mod test {
     #[test]
     fn def_pass() {
         let mut p = Parser::new(indoc! {r#"
-            def foo():
+            def foo:
                 pass
         "#});
 
@@ -401,7 +508,7 @@ mod test {
     #[test]
     fn loop_infinite() {
         let mut p = Parser::new(indoc! {r#"
-            def foo():
+            def foo:
                 loop:
                     pass
         "#});
@@ -421,7 +528,7 @@ mod test {
     #[test]
     fn loop_finite() {
         let mut p = Parser::new(indoc! {r#"
-            def foo():
+            def foo:
                 loop 20:
                     pass
         "#});
@@ -431,7 +538,7 @@ mod test {
             block: vec![
                 Stmt::Loop {
                     times: LoopTimes::Num(Expr::Int {
-                        token: Token { kind: TokenKind::Int, span: 20..22 },
+                        token: Token { kind: TokenKind::Int, span: 18..20 },
                         value: 20,
                     }),
                     block: vec![],
@@ -444,7 +551,7 @@ mod test {
     #[test]
     fn call_no_args() {
         let mut p = Parser::new(indoc! {r#"
-            def foo():
+            def foo:
                 bar()
         "#});
 
@@ -452,7 +559,7 @@ mod test {
             name: Token { kind: TokenKind::Identifier, span: 4..7 },
             block: vec![
                 Stmt::Call {
-                    callee: Token { kind: TokenKind::Identifier, span: 15..18 },
+                    callee: Token { kind: TokenKind::Identifier, span: 13..16 },
                     args: vec![],
                 }
             ],
@@ -463,7 +570,7 @@ mod test {
     #[test]
     fn call_with_args() {
         let mut p = Parser::new(indoc! {r#"
-            def foo():
+            def foo:
                 bar(1, 2)
         "#});
 
@@ -471,14 +578,14 @@ mod test {
             name: Token { kind: TokenKind::Identifier, span: 4..7 },
             block: vec![
                 Stmt::Call {
-                    callee: Token { kind: TokenKind::Identifier, span: 15..18 },
+                    callee: Token { kind: TokenKind::Identifier, span: 13..16 },
                     args: vec![
                         Expr::Int {
-                            token: Token { kind: TokenKind::Int, span: 19..20 },
+                            token: Token { kind: TokenKind::Int, span: 17..18 },
                             value: 1,
                         },
                         Expr::Int {
-                            token: Token { kind: TokenKind::Int, span: 22..23 },
+                            token: Token { kind: TokenKind::Int, span: 20..21 },
                             value: 2,
                         },
                     ],
@@ -491,7 +598,7 @@ mod test {
     #[test]
     fn call_with_many_args() {
         let mut p = Parser::new(indoc! {r#"
-            def foo():
+            def foo:
                 Bar(1, 2, 3)
         "#});
 
@@ -499,18 +606,18 @@ mod test {
             name: Token { kind: TokenKind::Identifier, span: 4..7 },
             block: vec![
                 Stmt::Call {
-                    callee: Token { kind: TokenKind::Identifier, span: 15..18 },
+                    callee: Token { kind: TokenKind::Identifier, span: 13..16 },
                     args: vec![
                         Expr::Int {
-                            token: Token { kind: TokenKind::Int, span: 19..20 },
+                            token: Token { kind: TokenKind::Int, span: 17..18 },
                             value: 1,
                         },
                         Expr::Int {
-                            token: Token { kind: TokenKind::Int, span: 22..23 },
+                            token: Token { kind: TokenKind::Int, span: 20..21 },
                             value: 2,
                         },
                         Expr::Int {
-                            token: Token { kind: TokenKind::Int, span: 25..26 },
+                            token: Token { kind: TokenKind::Int, span: 23..24 },
                             value: 3,
                         },
                     ],
@@ -523,7 +630,7 @@ mod test {
     #[test]
     fn call_with_args_multiline_trailing_comma() {
         let mut p = Parser::new(indoc! {r#"
-            def foo():
+            def foo:
                 bar(
                     1,
                     2,
@@ -534,14 +641,14 @@ mod test {
             name: Token { kind: TokenKind::Identifier, span: 4..7 },
             block: vec![
                 Stmt::Call {
-                    callee: Token { kind: TokenKind::Identifier, span: 15..18 },
+                    callee: Token { kind: TokenKind::Identifier, span: 13..16 },
                     args: vec![
                         Expr::Int {
-                            token: Token { kind: TokenKind::Int, span: 28..29 },
+                            token: Token { kind: TokenKind::Int, span: 26..27 },
                             value: 1,
                         },
                         Expr::Int {
-                            token: Token { kind: TokenKind::Int, span: 39..40 },
+                            token: Token { kind: TokenKind::Int, span: 37..38 },
                             value: 2,
                         },
                     ],
@@ -554,12 +661,12 @@ mod test {
     #[test]
     fn set_call() {
         let mut p = Parser::new(indoc! {r#"
-            def foo():
+            def foooo:
                 a, b = bar(x, y)
         "#});
 
         assert_eq!(p.parse_def(), Ok(Def {
-            name: Token { kind: TokenKind::Identifier, span: 4..7 },
+            name: Token { kind: TokenKind::Identifier, span: 4..9 },
             block: vec![
                 Stmt::SetVars {
                     vars: vec![
@@ -578,5 +685,30 @@ mod test {
             ],
         }));
         assert!(p.is_eof());
+    }
+
+    #[test]
+    fn if_elif_else() {
+        let mut p = Parser::new(indoc! {r#"
+            def foo:
+                if 1:
+                    pass
+                elif 1:
+                    pass
+                else:
+                    pass
+        "#});
+
+        let mut block = p.parse_def().unwrap().block;
+        assert!(p.is_eof());
+
+        assert_eq!(block.len(), 1);
+
+        if let Some(Stmt::If { then_block, else_block, .. }) = block.pop() {
+            assert_eq!(then_block, vec![]);
+            assert_eq!(else_block.unwrap().len(), 1);
+        } else {
+            panic!();
+        }
     }
 }

@@ -193,6 +193,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "indoc",
+ "lazy_static",
  "logos",
  "pretty_assertions",
  "serde",

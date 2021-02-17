@@ -39,6 +39,7 @@ pub enum Datatype {
     Int,
     Float,
     Const,
+    Bool,
 }
 
 impl Api {
