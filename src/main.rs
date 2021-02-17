@@ -24,6 +24,10 @@ enum Command {
         #[clap(short, long)]
         api: Option<Vec<String>>,
     },
+
+    ApiToHeader {
+        api: Vec<String>,
+    },
 }
 
 fn main() {
@@ -39,19 +43,7 @@ fn try_main(opts: Opts) -> Result<(), Box<dyn Error>> {
     match opts.command {
         Command::Compile { input, output, api } => {
             let input = std::fs::read_to_string(input)?;
-
-            let api = if let Some(api_paths) = api {
-                let mut api = Api::default();
-
-                for path in api_paths {
-                    let config = std::fs::read_to_string(path)?;
-                    api.union(toml::from_str(&config)?);
-                }
-
-                api
-            } else {
-                Api::default()
-            };
+            let api = load_api_paths(api)?;
 
             if let Some(output) = output {
                 let mut output = File::create(output)?;
@@ -61,9 +53,57 @@ fn try_main(opts: Opts) -> Result<(), Box<dyn Error>> {
                 paperscript::compile(&input, &mut output, &api, &mut print_warning)?;
             }
         }
+
+        Command::ApiToHeader { api } => {
+            let api = load_api_paths(Some(api))?;
+
+            println!("#ifndef _PAPERSCRIPT_API_H_");
+            println!("#define _PAPERSCRIPT_API_H_");
+            println!("");
+            println!("#include \"common.h\"");
+            println!("");
+
+            for (name, desc) in &api.functions {
+                if desc.namespace {
+                    println!("#ifdef NAMESPACE");
+                    println!("ApiStatus N({})(ScriptInstance* script, s32 isInitialCall);", name);
+                    println!("#endif");
+                } else {
+                    println!("ApiStatus {}(ScriptInstance* script, s32 isInitialCall);", name);
+                }
+            }
+
+            for (name, desc) in &api.scripts {
+                if desc.namespace {
+                    println!("#ifdef NAMESPACE");
+                    println!("extern Bytecode N({})[];", name);
+                    println!("#endif");
+                } else {
+                    println!("extern Bytecode {}[];", name);
+                }
+            }
+
+            println!("");
+            println!("#endif");
+        }
     }
 
     Ok(())
+}
+
+fn load_api_paths(api_paths: Option<Vec<String>>) -> Result<Api, std::io::Error> {
+    if let Some(api_paths) = api_paths {
+        let mut api = Api::default();
+
+        for path in api_paths {
+            let config = std::fs::read_to_string(path)?;
+            api.union(toml::from_str(&config)?);
+        }
+
+        Ok(api)
+    } else {
+        Ok(Api::default())
+    }
 }
 
 fn print_error(error: Box<dyn Error>) {

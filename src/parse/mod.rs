@@ -88,7 +88,11 @@ impl<'input> Parser<'input> {
 
     pub fn parse_def(&mut self) -> Result<Def> {
         self.expect(TokenKind::Def)?;
-        let name = self.expect(TokenKind::Identifier)?;
+        let name = self.next()?;
+        match name.kind {
+            TokenKind::Identifier | TokenKind::ExternalIdentifier => {}
+            _ => return Err(self.unexpected_token(name, "identifier")),
+        }
         //self.expect(TokenKind::OpenParen)?;
         //self.expect(TokenKind::CloseParen)?;
         self.expect(TokenKind::Colon)?;

@@ -62,7 +62,7 @@ where
     O: Write,
     F: FnMut(Warning),
 {
-    writeln!(output, "#include \"common.h\"")?;
+    writeln!(output, "#include \"script_api.h\"")?;
     let mut compiler = Compiler::new(input, output, api, handle_warning);
     compiler.compile()
 }
@@ -162,18 +162,20 @@ where
 
             let namespace = if let Some(script) = self.api.scripts.get(script_name) {
                 script.namespace
+            } else if def.name.kind == TokenKind::ExternalIdentifier {
+                false
             } else {
                 // Add the script var to context so it can be referenced from now on
-                let var = Var::Script(script_name.to_owned(), api::Script { namespace: false });
+                let var = Var::Script(script_name.to_owned(), api::Script { namespace: true });
                 global_ctx.vars.insert(script_name.to_owned(), var);
 
-                false
+                true
             };
 
             if namespace {
-                writeln!(self.output, "Bytecode {}[];", script_name)?;
+                writeln!(self.output, "extern Bytecode N({})[];", script_name)?;
             } else {
-                writeln!(self.output, "Bytecode N({})[];", script_name)?;
+                writeln!(self.output, "extern Bytecode {}[];", script_name)?;
             }
 
             defs.push((script_name, def, namespace));
@@ -183,12 +185,15 @@ where
             let mut ctx = global_ctx.clone();
 
             if namespace {
-                writeln!(self.output, "Bytecode {}[] = {{", script_name)?;
-            } else {
                 writeln!(self.output, "Bytecode N({})[] = {{", script_name)?;
+            } else {
+                writeln!(self.output, "Bytecode {}[] = {{", script_name)?;
             }
 
             self.compile_block(&mut ctx, def.block)?;
+
+            writeln!(self.output, "SI_CMD(OP_RETURN),")?;
+            writeln!(self.output, "SI_CMD(OP_END),")?;
 
             writeln!(self.output, "}};")?;
         }

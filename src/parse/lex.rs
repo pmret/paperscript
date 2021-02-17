@@ -489,14 +489,6 @@ mod test {
     }
 
     #[test]
-    fn extern_identifier() {
-        let toks: Vec<Token> = Lexer::new("AA").collect();
-        assert_eq!(toks, vec![
-            Token { kind: ExternalIdentifier, span: 0..2 },
-        ]);
-    }
-
-    #[test]
     fn extern_identifier_func_macro() {
         let toks: Vec<Token> = Lexer::new("LW(0)").collect();
         assert_eq!(toks, vec![
