@@ -2,12 +2,14 @@ use std::fmt;
 
 #[derive(Debug, Clone)]
 pub enum Warning {
-    VarRedeclaration { var_name: String, pos: (usize, usize) },
+    CallUndeclaredFunc(String),
 }
 
 impl fmt::Display for Warning {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Warning::CallUndeclaredFunc(func) => write!(f, "Use of undeclared function {:?} (consider adding it to the API toml)", func),
+        }
     }
 }
 

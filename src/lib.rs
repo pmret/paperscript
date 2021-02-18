@@ -381,24 +381,35 @@ where
                 }
 
                 Stmt::Call { callee: callee_token, args } => {
-                    let callee = self.lookup_var(ctx, &callee_token)?;
-                    if let Var::Function(_, func_desc) = &callee {
-                        let args = if let Some(func_args) = &func_desc.args {
-                            self.compile_call_args(ctx, &args, &func_args)?
-                        } else {
-                            self.compile_call_args_no_desc(ctx, &args)?
-                        };
+                    if let Ok(callee) = self.lookup_var(ctx, &callee_token) {
+                        if let Var::Function(_, func_desc) = &callee {
+                            let args = if let Some(func_args) = &func_desc.args {
+                                self.compile_call_args(ctx, &args, &func_args)?
+                            } else {
+                                self.compile_call_args_no_desc(ctx, &args)?
+                            };
 
-                        write!(self.output, "SI_CMD(OP_CALL_FUNC, {}", callee)?;
+                            write!(self.output, "SI_CMD(OP_CALL_FUNC, {}", callee)?;
+                            for arg in args {
+                                write!(self.output, ", {}", arg)?;
+                            }
+                            writeln!(self.output, "),")?;
+                        } else {
+                            return Err(Error::CallNonFunction {
+                                callee: callee_token.source(self.input).to_owned(),
+                                pos: callee_token.position(self.input),
+                            });
+                        }
+                    } else {
+                        (self.handle_warning)(Warning::CallUndeclaredFunc(callee_token.source(self.input).to_owned()));
+
+                        let args = self.compile_call_args_no_desc(ctx, &args)?;
+
+                        write!(self.output, "SI_CMD(OP_CALL_FUNC, (Bytecode)(&{})", callee_token.source(self.input))?;
                         for arg in args {
                             write!(self.output, ", {}", arg)?;
                         }
                         writeln!(self.output, "),")?;
-                    } else {
-                        return Err(Error::CallNonFunction {
-                            callee: callee_token.source(self.input).to_owned(),
-                            pos: callee_token.position(self.input),
-                        });
                     }
                 }
 
