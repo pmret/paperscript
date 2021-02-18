@@ -34,6 +34,7 @@ pub enum Stmt {
     Call { callee: Token, args: Vec<Expr> },
     Exec { callee: Token },
     ExecWait { callee: Token },
+    Return,
     Sleep(Expr),
     SleepSecs(Expr),
 }

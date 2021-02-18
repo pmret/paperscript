@@ -443,6 +443,10 @@ where
                     let (expr, _) = self.compile_expression(ctx, &expr)?;
                     writeln!(self.output, "SI_CMD(OP_SLEEP_SECS, {}),", expr)?;
                 }
+
+                Stmt::Return => {
+                    writeln!(self.output, "SI_CMD(OP_RETURN),")?;
+                }
             }
         }
         Ok(())

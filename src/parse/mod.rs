@@ -189,6 +189,12 @@ impl<'input> Parser<'input> {
                     self.accept(TokenKind::Newline)?;
                 }
 
+                // return
+                TokenKind::Return => {
+                    block.push(Stmt::Return);
+                    self.accept(TokenKind::Newline)?;
+                }
+
                 TokenKind::Identifier | TokenKind::ExternalIdentifier => {
                     let operator = self.next()?;
                     match operator.kind {

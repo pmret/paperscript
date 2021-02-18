@@ -94,6 +94,9 @@ pub enum TokenKind {
     #[token("sleepsecs")]
     SleepSecs,
 
+    #[token("return")]
+    Return,
+
     #[token(":")]
     Colon,
 
